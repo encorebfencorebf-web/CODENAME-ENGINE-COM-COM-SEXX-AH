@@ -1,70 +1,137 @@
-name: Check Library Changes
-
-# Mencari commit library git yang masuk SETELAH build hijau pertama.
-# Tidak mem-build apa pun, hanya membaca riwayat repo library (semuanya publik).
-
+name: Android Build & Release
 on:
   workflow_dispatch:
-    inputs:
-      green_time:
-        description: "Waktu library dipasang pada build HIJAU (UTC)"
-        default: "2026-11-17T11:30:00Z"
-      red_time:
-        description: "Waktu library dipasang pada build MERAH (UTC)"
-        default: "2026-11-18T08:56:00Z"
+  workflow_call:
+
+permissions:
+  contents: write
 
 jobs:
-  check:
+  build:
+    name: Android Build & Release (32 + 64 bit)
     runs-on: ubuntu-latest
     steps:
-      - name: Cek riwayat tiap library
-        env:
-          GREEN: ${{ inputs.green_time }}
-          RED: ${{ inputs.red_time }}
+      - name: Checkout
+        uses: actions/checkout@main
+        with:
+          fetch-depth: 0
+
+      - name: Setting up Haxe
+        uses: krdlab/setup-haxe@v2
+        with:
+          haxe-version: 4.3.7
+
+      - name: Setup Android NDK
+        id: setup-ndk
+        uses: nttld/setup-ndk@main
+        with:
+          ndk-version: r25c
+
+      - name: Installing/Updating libraries
         run: |
-          mkdir -p work && cd work
-          # nama|url|branch (kosong = branch default)
-          LIBS='
-          mobile-controls|https://github.com/ArkoseLabsOfficial/mobile-controls|
-          openfl|https://github.com/CodenameCrew/cne-openfl|old
-          lime|https://github.com/ArkoseLabsOfficial/lime|
-          flixel|https://github.com/CodenameCrew/cne-flixel|old
-          flixel-addons|https://github.com/CodenameCrew/cne-flixel-addons|old
-          hscript-improved|https://github.com/CodenameCrew/hscript-improved|custom-classes
-          flxanimate|https://github.com/CodenameCrew/cne-flxanimate|
-          hxdiscord_rpc|https://github.com/CodenameCrew/cne-hxdiscord_rpc|old
-          away3d|https://github.com/CodenameCrew/away3d|
-          '
-          S="$GITHUB_STEP_SUMMARY"
-          echo "# Perubahan library" >> "$S"
-          echo "Jendela: hijau = \`$GREEN\`, merah = \`$RED\`" >> "$S"
-          echo >> "$S"
-          CHANGED=""
-          echo "$LIBS" | while IFS='|' read -r name url branch; do
-            [ -z "$name" ] && continue
-            if [ -n "$branch" ]; then
-              git clone -q --filter=blob:none --single-branch --branch "$branch" "$url" "$name" || { echo "GAGAL clone $name" >> "$S"; continue; }
-            else
-              git clone -q --filter=blob:none "$url" "$name" || { echo "GAGAL clone $name" >> "$S"; continue; }
+          haxe -cp commandline -D analyzer-optimize --run Main setup -s
+
+      - name: Configure Android
+        run: |
+          haxelib run lime setup -alias -y
+          haxelib run lime config ANDROID_SDK $ANDROID_HOME
+          haxelib run lime config ANDROID_NDK_ROOT $ANDROID_NDK_HOME
+          haxelib run lime config JAVA_HOME $JAVA_HOME_17_X64
+          haxelib run lime config ANDROID_SETUP true
+
+      - name: Fix Haxelib
+        run: |
+          haxelib set lime git
+          haxelib set hxcpp git
+          haxelib set flixel git
+          haxelib set flixel-addons git
+          haxelib set flxanimate git
+          haxelib set hxdiscord_rpc git
+
+      - name: Diagnosa
+        run: |
+          {
+            echo "== haxe version"
+            haxe --version
+            echo
+            echo "== haxelib list"
+            haxelib list
+            echo
+            echo "== commit library git"
+            for d in .haxelib/*/git; do
+              echo "$d: $(git -C "$d" rev-parse --short HEAD 2>/dev/null) $(git -C "$d" log -1 --format=%cd 2>/dev/null)"
+            done
+            echo
+            echo "== AndroidPlatform.hx (baris 130-160 dan 405-440)"
+            sed -n '130,160p;405,440p' .haxelib/lime/git/tools/platforms/AndroidPlatform.hx
+            echo
+            echo "== ONLY_ARM64 di mana saja"
+            grep -rn "ONLY_ARM64" . .haxelib/lime/git 2>/dev/null | head -20 || true
+            echo
+            echo "== EditorTreeMenu.hx (1-40)"
+            sed -n '1,40p' source/funkin/editors/EditorTreeMenu.hx
+            echo
+            echo "== TreeMenu.hx (1-60)"
+            sed -n '1,60p' source/funkin/options/TreeMenu.hx
+          } 2>&1 | tee diagnosa.txt
+
+      - name: Rebuild Lime for Android (arm64 + armv7)
+        run: |
+          LIME=$(haxelib libpath lime)
+          haxelib run lime rebuild android -arm64
+          haxelib run lime rebuild android -armv7
+          ls -la "${LIME}ndll/Android/"
+
+      - name: Verify liblime (fail fast)
+        run: |
+          LIME=$(haxelib libpath lime)
+          FAIL=0
+          for N in liblime-64.so liblime-v7.so; do
+            F="${LIME}ndll/Android/$N"
+            echo "== $N"
+            readelf --dyn-syms "$F" | grep __emutls_get_address || true
+            if readelf --dyn-syms "$F" | grep __emutls_get_address | grep -q " UND "; then
+              echo "$N masih rusak (UND __emutls_get_address)"
+              FAIL=1
             fi
-            cd "$name"
-            PIN=$(git rev-list -1 --before="$GREEN" HEAD)
-            TIP=$(git rev-parse HEAD)
-            {
-              echo "## $name  (${branch:-default})"
-              echo "- url: $url"
-              echo "- commit terakhir sebelum build hijau (kandidat pin): \`${PIN:-?}\`"
-              echo "- commit paling baru sekarang: \`$TIP\`"
-              echo
-              echo "Commit setelah build hijau:"
-              echo '```'
-              git log --since="$GREEN" --format='%h %cI %an  %s' HEAD | head -40
-              echo '```'
-              echo "Di antara hijau dan merah (ini yang paling dicurigai):"
-              echo '```'
-              git log --since="$GREEN" --until="$RED" --format='%h %cI %an  %s' HEAD | head -40
-              echo '```'
-              echo
-            } >> "$S"
-            cd ..
           done
+          if [ "$FAIL" = "1" ]; then exit 1; fi
+          echo "Semua liblime OK"
+
+      - name: Building the game (32 + 64 bit)
+        run: |
+          set -o pipefail
+          haxelib run lime build android -final -arm64 -armv7 -verbose 2>&1 | tee build.log
+
+      - name: Upload diagnosa & log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnosa-dan-log
+          path: |
+            diagnosa.txt
+            build.log
+          if-no-files-found: warn
+
+      - name: Inspect native libs
+        run: |
+          APK=$(find export -name "*.apk" | head -1)
+          echo "APK: $APK"
+          rm -rf /tmp/apk && mkdir -p /tmp/apk && unzip -q "$APK" -d /tmp/apk
+          echo "== ABI di dalam APK (harus ada arm64-v8a DAN armeabi-v7a)"
+          ls /tmp/apk/lib/
+
+      - name: Uploading artifact (entire build)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Codename Engine Android
+          path: export/**/*.apk
+
+      - name: Publish The Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "mobile-legacy"
+          tag_name: "mobile-legacy"
+          prerelease: false
+          files: |
+            export/**/*.apk
