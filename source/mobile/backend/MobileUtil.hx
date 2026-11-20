@@ -25,25 +25,13 @@ typedef ModeData = { Name:String, Folder:String }
 class MobileUtil
 {
 	#if sys
-	/** Nama package, diambil dari project.xml (packageName). */
+	/** Nama package (samakan dengan packageName di project.xml). */
 	public static function getPackageName():String
-	{
-		var p:String = null;
-		try {
-			p = Application.current.meta.get("packageName");
-		} catch (e:Dynamic) {}
-		return (p == null || p == "") ? "com.bfexeopt2.codenameenginelegacy" : p;
-	}
+		return "com.bfexeopt2.codenameenginelegacy";
 
-	/** Nama file/folder, diambil dari project.xml (file="BFEXEOPTFILE"). */
+	/** Nama folder (samakan dengan file="..." di project.xml). */
 	public static function getFileName():String
-	{
-		var f:String = null;
-		try {
-			f = Application.current.meta.get("file");
-		} catch (e:Dynamic) {}
-		return (f == null || f == "") ? "BFEXEOPTFILE" : f;
-	}
+		return "BFEXEOPTFILE";
 
 	public static function getAssetDirectory():String
 		return #if android haxe.io.Path.addTrailingSlash("/sdcard/Android/data/" + getPackageName() + "/files") #elseif ios lime.system.System.documentsDirectory #else Sys.getCwd() #end;
