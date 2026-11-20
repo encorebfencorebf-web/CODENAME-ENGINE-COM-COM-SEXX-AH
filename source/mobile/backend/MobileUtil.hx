@@ -25,8 +25,28 @@ typedef ModeData = { Name:String, Folder:String }
 class MobileUtil
 {
 	#if sys
-	public static inline function getAssetDirectory():String
-		return #if android haxe.io.Path.addTrailingSlash("/sdcard/Android/data/com.yoshman29.codenameenginelegacy/files") #elseif ios lime.system.System.documentsDirectory #else Sys.getCwd() #end;
+	/** Nama package, diambil dari project.xml (packageName). */
+	public static function getPackageName():String
+	{
+		var p:String = null;
+		try {
+			p = Application.current.meta.get("packageName");
+		} catch (e:Dynamic) {}
+		return (p == null || p == "") ? "com.bfexeopt2.codenameenginelegacy" : p;
+	}
+
+	/** Nama file/folder, diambil dari project.xml (file="BFEXEOPTFILE"). */
+	public static function getFileName():String
+	{
+		var f:String = null;
+		try {
+			f = Application.current.meta.get("file");
+		} catch (e:Dynamic) {}
+		return (f == null || f == "") ? "BFEXEOPTFILE" : f;
+	}
+
+	public static function getAssetDirectory():String
+		return #if android haxe.io.Path.addTrailingSlash("/sdcard/Android/data/" + getPackageName() + "/files") #elseif ios lime.system.System.documentsDirectory #else Sys.getCwd() #end;
 
 	#if android
 	public static inline function getCustomStoragePath():String
@@ -86,17 +106,18 @@ class MobileUtil
 		 **/
 		switch(curStorageType) {
 			case 'EXTERNAL':
-				daPath = "/sdcard/.CodenameEngine";
+				// folder bernama sesuai file="..." di project.xml
+				daPath = "/sdcard/" + getFileName();
 			/* obb doesnt work and I dont wanna fix it -ArkoseLabs
 			case 'EXTERNAL_OBB':
-				daPath = "/sdcard/Android/obb/com.yoshman29.codenameenginelegacy";
+				daPath = "/sdcard/Android/obb/" + getPackageName();
 			*/
 			case 'EXTERNAL_MEDIA':
-				daPath = "/sdcard/Android/media/com.yoshman29.codenameenginelegacy";
+				daPath = "/sdcard/Android/media/" + getPackageName();
 			case 'EXTERNAL_DATA':
-				daPath = "/sdcard/Android/data/com.yoshman29.codenameenginelegacy/files";
+				daPath = "/sdcard/Android/data/" + getPackageName() + "/files";
 			default: //technically not needed but here for safety -ArkoseLabs
-				if (daPath == null || daPath == '') daPath = "/sdcard/Android/data/com.yoshman29.codenameenginelegacy/files";
+				if (daPath == null || daPath == '') daPath = "/sdcard/Android/data/" + getPackageName() + "/files";
 		}
 		daPath = Path.addTrailingSlash(daPath);
 		currentDirectory = daPath;
